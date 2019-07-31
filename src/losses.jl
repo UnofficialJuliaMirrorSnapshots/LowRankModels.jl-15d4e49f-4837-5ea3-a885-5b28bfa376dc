@@ -100,10 +100,11 @@ end
 # grad{T<:Number}(l::Loss, u::Array{T,1}, a) = grad(l,convert(Array{Float64,1},u),a)
 
 ### -1,0,1::Int are translated to Booleans if loss is not defined on numbers
-convert(::Type{Bool}, x::Int) = x==1 ? true : (x==-1 || x==0) ? false : throw(InexactError())
-evaluate(l::ClassificationLoss, u::Float64, a::Int) = evaluate(l,u,Bool(a))
-grad(l::ClassificationLoss, u::Float64, a::Int) = grad(l,u,Bool(a))
-M_estimator(l::ClassificationLoss, a::AbstractArray{Int,1}) = M_estimator(l,Bool(a))
+# convert(::Type{Bool}, x::Int) = x==1 ? true : (x==-1 || x==0) ? false : throw(InexactError("Bool method successfully overloaded by LowRankModels"))
+myBool(x::Int) = x==1 ? true : (x==-1 || x==0) ? false : throw(InexactError())
+evaluate(l::ClassificationLoss, u::Float64, a::Int) = evaluate(l,u,myBool(a))
+grad(l::ClassificationLoss, u::Float64, a::Int) = grad(l,u,myBool(a))
+M_estimator(l::ClassificationLoss, a::AbstractArray{Int,1}) = M_estimator(l,myBool(a))
 
 ### M-estimators
 
@@ -126,10 +127,9 @@ end
 # average error incurred by using the estimate uₒ for every aᵢ
 function avgerror(l::Loss, a::AbstractArray)
     b = collect(skipmissing(a))
-    m = M_estimator(l,a)
-    sum(map(ai->evaluate(l,m,ai),a))/length(a)
+    m = M_estimator(l,b)
+    sum(map(ai->evaluate(l,m,ai),b))/length(b)
 end
-
 
 ## Losses:
 
@@ -176,7 +176,7 @@ end
 
 grad(l::HuberLoss,u::Float64,a::Number) = abs(u-a)>l.crossover ? sign(u-a)*l.scale : (u-a)*l.scale
 
-# M_estimator(l::HuberLoss, a::AbstractArray) = median(a) # a heuristic, not the true estimator.
+M_estimator(l::HuberLoss, a::AbstractArray) = median(a) # a heuristic, not the true estimator
 
 ########################################## QUANTILE ##########################################
 # f: ℜxℜ -> ℜ
@@ -465,14 +465,14 @@ mutable struct BvSLoss<:Loss
     scale::Float64
     domain::Domain
 end
-BvSLoss(m::Integer, scale::Float64=1.0; domain=OrdinalDomain(1,m), bin_loss::Loss=LogisticLoss(scale)) = BvSLoss(m,bin_loss,scale,domain)
+function BvSLoss(m::Integer, scale::Float64=1.0; domain=OrdinalDomain(1,m), bin_loss::Loss=LogisticLoss(scale))
+  @assert(m >= 2, error("Number of levels of ordinal variable must be at least 2; got $m."))
+  BvSLoss(m,bin_loss,scale,domain)
+end
 BvSLoss() = BvSLoss(10) # for copying correctly
 embedding_dim(l::BvSLoss) = l.max-1
 datalevels(l::BvSLoss) = 1:l.max # levels are encoded as the numbers 1:l.max
 
-# in Julia v0.4, argument u is a row vector (row slice of a matrix), which in julia is 2d
-# function evaluate(l::BvSLoss, u::Array{Float64,2}, a::Int)
-# this breaks compatibility with v0.4
 function evaluate(l::BvSLoss, u::Array{Float64,1}, a::Int)
     loss = 0
     for j in 1:length(u)
@@ -481,9 +481,6 @@ function evaluate(l::BvSLoss, u::Array{Float64,1}, a::Int)
     return l.scale*loss
 end
 
-# in Julia v0.4, argument u is a row vector (row slice of a matrix), which in julia is 2d
-# function grad(l::BvSLoss, u::Array{Float64,2}, a::Int)
-# this breaks compatibility with v0.4
 function grad(l::BvSLoss, u::Array{Float64,1}, a::Int)
   g = zeros(length(u))
   for j in 1:length(u)
